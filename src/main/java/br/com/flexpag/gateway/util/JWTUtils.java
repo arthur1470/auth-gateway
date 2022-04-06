@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
-import org.springframework.util.ObjectUtils;
 
 @Component
 public final class JWTUtils {
@@ -16,7 +15,6 @@ public final class JWTUtils {
 	private final Algorithm algorithm;
 
 	public JWTUtils(@Value("${TOKEN.PASSWORD}") String tokenPassword) {
-		System.out.println(tokenPassword);
 		this.algorithm = Algorithm.HMAC256(tokenPassword);
 	}
 
@@ -26,11 +24,10 @@ public final class JWTUtils {
 	}
 
 	public String getTokenFromRequest(ServerHttpRequest request) {
+		String authorizationHeader = request.getHeaders().getOrEmpty(HttpHeaders.AUTHORIZATION).get(0);
 
-		String authorizationHeader = request.getHeaders().get(HttpHeaders.AUTHORIZATION).get(0);
-
-		if (ObjectUtils.isEmpty(authorizationHeader) || !authorizationHeader.startsWith("Bearer "))
-			throw new RuntimeException("Refresh token is missing");
+		if (authorizationHeader.isEmpty() || !authorizationHeader.startsWith("Bearer "))
+			throw new RuntimeException("Authentication token is missing.");
 
 		return authorizationHeader.substring("Bearer ".length());
 	}

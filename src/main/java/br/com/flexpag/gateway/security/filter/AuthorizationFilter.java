@@ -14,83 +14,92 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
+import java.util.Optional;
+
 @Component
 @RefreshScope
 @AllArgsConstructor
 public class AuthorizationFilter implements GatewayFilter {
 
-    private final RouterValidator routerValidator;
     private final JWTUtils jwtUtils;
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
-        var organizationId = request.getHeaders().get("organizationId");
-        var applicationId = request.getHeaders().get("applicationId");
 
-        if (routerValidator.isSecured.test(request)) {
-            if (this.isAuthMissing(request))
-                return this.onError(exchange, "Authorization header is missing in request", HttpStatus.UNAUTHORIZED);
+        this.validateRequiredHeaders(request, exchange);
 
-            final String token = this.getAuthHeader(request);
+        if (RouterValidator.isSecured.test(request)) {
+            var jwtToken = jwtUtils.getDecodedJWTFromRequest(request);
 
-
-            this.populateRequestWithHeaders(exchange, token);
+            this.validateAuthMissing(request, exchange);
+            this.validateTokenAndHeaderInformationMatches(request, exchange, jwtToken);
+            this.populateRequestWithHeaders(request, jwtToken);
         }
 
         return chain.filter(exchange);
     }
 
-    private Mono<Void> onError(ServerWebExchange exchange, String err, HttpStatus httpStatus) {
-        ServerHttpResponse response = exchange.getResponse();
-        response.setStatusCode(httpStatus);
-        return response.setComplete();
+    private void validateRequiredHeaders(ServerHttpRequest request, ServerWebExchange exchange) {
+        if(getApplicationHeader(request).isBlank())
+            this.onError(exchange, "Application header is missing in request", HttpStatus.UNAUTHORIZED);
+
+        if(getOrganizationHeader(request).isBlank())
+            this.onError(exchange, "Organization header is missing in request", HttpStatus.UNAUTHORIZED);
     }
 
-    private String getAuthHeader(ServerHttpRequest request) {
-        return request.getHeaders().getOrEmpty(HttpHeaders.AUTHORIZATION).get(0);
+    private void validateAuthMissing(ServerHttpRequest request, ServerWebExchange exchange) {
+        if(!request.getHeaders().containsKey(HttpHeaders.AUTHORIZATION))
+            this.onError(exchange, "Authorization header is missing in request", HttpStatus.UNAUTHORIZED);
     }
 
-    private boolean isAuthMissing(ServerHttpRequest request) {
-        return !request.getHeaders().containsKey("Authorization");
-    }
-
-    private void populateRequestWithHeaders(ServerWebExchange exchange,  String token) {
-        DecodedJWT decodedJWT = jwtUtils.getDecodedJWTFromRequest(exchange.getRequest());
-
-        exchange.getRequest().mutate()
+    private void populateRequestWithHeaders(ServerHttpRequest request, DecodedJWT decodedJWT) {
+        request.mutate()
                 .header("userId", String.valueOf(decodedJWT.getSubject()))
                 .header("roles", String.valueOf(decodedJWT.getClaim("roles")))
+                .header("permissions", String.valueOf(decodedJWT.getClaim("permissions")))
                 .build();
     }
 
+    private void validateTokenAndHeaderInformationMatches(ServerHttpRequest request, ServerWebExchange exchange, DecodedJWT jwtToken) {
+        var tokenOrganization = getTokenOrganizationId(jwtToken);
+        var tokenApplication = getTokenApplicationId(jwtToken);
 
-//	private final JWTUtils jwtUtils;
-//
-//	@Override
-//	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
-//		var authorizationHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-//		boolean hasAuthorizationHeader = !ObjectUtils.isEmpty(authorizationHeader) && authorizationHeader.startsWith("Bearer ");
-//
-//		var organizationId = request.getHeader("organizationId");
-//		var applicationId = request.getHeader("applicationId");
-//
-//		if(request.getServletPath().equals("/login") || !hasAuthorizationHeader) {
-//			filterChain.doFilter(request, response);
-//			return;
-//		}
-//
-//		DecodedJWT decodedJWT = jwtUtils.getDecodedJWTFromRequest(request);
-//
-//		String userId = decodedJWT.getSubject();
-//		String[] roles = decodedJWT.getClaim("roles").asArray(String.class);
-////		String[] permissions = decodedJWT.getClaim("permissions").asArray(String.class);
-//
-//		List<SimpleGrantedAuthority> authorities = new ArrayList<>();
-//		Arrays.stream(roles).forEach(role -> authorities.add(new SimpleGrantedAuthority(role)));
-//
-//		SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(userId, null, authorities));
-//
-//		filterChain.doFilter(request, response);
-//	}
+        var headerOrganization = getOrganizationHeader(request);
+        var headerApplication = getApplicationHeader(request);
+
+        if(!tokenOrganization.equals(headerOrganization))
+            this.onError(exchange, "Incorrect organization header for authorization token.", HttpStatus.UNAUTHORIZED);
+
+        if(!tokenApplication.equals(headerApplication))
+            this.onError(exchange, "Incorrect application header for authorization token.", HttpStatus.UNAUTHORIZED);
+    }
+
+    private Mono<Void> onError(ServerWebExchange exchange, String err, HttpStatus httpStatus) {
+        ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(httpStatus);
+
+        return response.setComplete();
+    }
+
+    private String getApplicationHeader(ServerHttpRequest request) {
+        return Optional.of(request.getHeaders().getOrEmpty("applicationId"))
+                .orElse(List.of(""))
+                .get(0);
+    }
+
+    private String getOrganizationHeader(ServerHttpRequest request) {
+        return Optional.of(request.getHeaders().getOrEmpty("organizationId"))
+                .orElse(List.of(""))
+                .get(0);
+    }
+
+    private String getTokenOrganizationId(DecodedJWT decodedJWT) {
+        return decodedJWT.getClaim("organization").asString();
+    }
+
+    private String getTokenApplicationId(DecodedJWT decodedJWT) {
+        return decodedJWT.getClaim("application").asString();
+    }
 }

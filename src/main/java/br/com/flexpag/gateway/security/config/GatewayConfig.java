@@ -1,19 +1,17 @@
 package br.com.flexpag.gateway.security.config;
 
 import br.com.flexpag.gateway.security.filter.AuthorizationFilter;
+import lombok.AllArgsConstructor;
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@AllArgsConstructor
 public class GatewayConfig {
 
     private final AuthorizationFilter authFilter;
-
-    public GatewayConfig(AuthorizationFilter authFilter) {
-        this.authFilter = authFilter;
-    }
 
     @Bean
     public RouteLocator routes(RouteLocatorBuilder builder) {
